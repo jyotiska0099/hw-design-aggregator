@@ -1,0 +1,41 @@
+# Hardware Register Report — {{ device.name }}
+
+| Property | Value |
+|---|---|
+| Device | {{ device.name }} |
+| Version | {{ device.version or "N/A" }} |
+| CPU | {{ device.cpu_name or "N/A" }} |
+| Peripherals | {{ device.peripherals | length }} |
+| Total Registers | {{ device.peripherals | total_registers }} |
+
+---
+
+{% for peripheral in device.peripherals %}
+## {{ peripheral.name }}
+
+**Base Address:** `0x{{ "%08X" | format(peripheral.base_address) }}`
+{% if peripheral.description %}**Description:** {{ peripheral.description }}{% endif %}
+
+{% if peripheral.registers %}
+| Register | Offset | Access | Reset | Fields |
+|---|---|---|---|---|
+{% for register in peripheral.registers %}
+| `{{ register.name }}` | `0x{{ "%03X" | format(register.address_offset) }}` | {{ register.access or "—" }} | {{ "0x%08X" | format(register.reset_value) if register.reset_value is not none else "—" }} | {{ register.fields | length }} |
+{% endfor %}
+
+{% for register in peripheral.registers %}
+{% if register.fields %}
+### {{ peripheral.name }} → {{ register.name }}
+
+{% if register.description %}{{ register.description }}{% endif %}
+
+| Field | Bits | Access | Description |
+|---|---|---|---|
+{% for field in register.fields %}
+| `{{ field.name }}` | [{{ field.bit_offset + field.bit_width - 1 }}:{{ field.bit_offset }}] | {{ field.access or "—" }} | {{ field.description or "—" }} |
+{% endfor %}
+
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
