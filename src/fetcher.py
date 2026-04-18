@@ -2,6 +2,7 @@
 from __future__ import annotations
 import requests
 from pathlib import Path
+import sys
 
 # Base raw URL for the modm-io cmsis-svd-stm32 repo
 _BASE_URL = "https://raw.githubusercontent.com/modm-io/cmsis-svd-stm32/main"
@@ -41,43 +42,62 @@ def _resolve_family(chip: str) -> tuple[str, str]:
 def fetch_svd(chip: str, svd_dir: str | Path = "svd_files") -> Path:
     """
     Download an SVD file for the given chip name.
+    Tries common suffix variants if exact name not found.
 
     Examples:
+        fetch_svd("STM32F103")   → tries STM32F103.svd, STM32F103xx.svd, STM32F103x6.svd ...
         fetch_svd("STM32F0x0")   → svd_files/STM32F0x0.svd
-        fetch_svd("STM32F103xx") → svd_files/STM32F103xx.svd
     """
     svd_dir = Path(svd_dir)
     svd_dir.mkdir(parents=True, exist_ok=True)
 
-    folder, chip_upper = _resolve_family(chip)
-    filename = f"{chip_upper}.svd"
-    out_path = svd_dir / filename
+    folder, chip_name = _resolve_family(chip)
 
-    if out_path.exists():
-        print(f"[fetch] Already cached: {out_path}")
+    # Variants to try in order — exact name first, then common suffixes
+    candidates = [
+        chip_name,
+        f"{chip_name}xx",
+        f"{chip_name}x6",
+        f"{chip_name}x8",
+        f"{chip_name}xB",
+        f"{chip_name}xC",
+        f"{chip_name}xE",
+        f"{chip_name}xG",
+    ]
+
+    for candidate in candidates:
+        filename = f"{candidate}.svd"
+        out_path = svd_dir / filename
+
+        # Return immediately if already cached
+        if out_path.exists():
+            print(f"[fetch] Already cached: {out_path}")
+            return out_path
+
+        url = f"{_BASE_URL}/{folder}/{filename}"
+        print(f"[fetch] Trying {url} ...")
+
+        try:
+            response = requests.get(url, timeout=15)
+        except requests.RequestException as e:
+            print(f"[fetch] Network error: {e}", file=sys.stderr)
+            continue
+
+        if response.status_code == 404:
+            continue  # try next variant
+
+        response.raise_for_status()
+
+        content = response.text
+        if not content.strip().startswith("<?xml"):
+            continue  # not valid XML, try next
+
+        out_path.write_text(content, encoding="utf-8")
+        print(f"[fetch] Saved → {out_path}")
         return out_path
 
-    url = f"{_BASE_URL}/{folder}/{filename}"
-    print(f"[fetch] Downloading {url} ...")
-
-    response = requests.get(url, timeout=15)
-
-    if response.status_code == 404:
-        raise FileNotFoundError(
-            f"SVD not found for '{chip}' at {url}\n"
-            f"Check available files at: https://github.com/modm-io/cmsis-svd-stm32/tree/main/{folder}"
-        )
-
-    response.raise_for_status()
-
-    # Sanity check — make sure we got XML not an HTML error page
-    content = response.text
-    if not content.strip().startswith("<?xml"):
-        raise ValueError(
-            f"Downloaded content doesn't look like XML.\n"
-            f"Got: {content[:120]}"
-        )
-
-    out_path.write_text(content, encoding="utf-8")
-    print(f"[fetch] Saved → {out_path}")
-    return out_path
+    raise FileNotFoundError(
+        f"Could not find an SVD file for '{chip}' in folder '{folder}'.\n"
+        f"Tried variants: {', '.join(candidates)}\n"
+        f"Browse available files at: https://github.com/modm-io/cmsis-svd-stm32/tree/main/{folder}"
+    )
